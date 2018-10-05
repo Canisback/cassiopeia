@@ -8,9 +8,18 @@ from typing import MutableMapping, Any, Union, TypeVar, Iterable, Type, List, Tu
 from datapipelines import DataSource, PipelineContext
 from merakicommons.ratelimits import FixedWindowRateLimiter, MultiRateLimiter
 
-from ..common import HTTPClient, HTTPError, Curl
 from ...data import Platform
 from ...dto.staticdata.realm import RealmDto
+
+
+try:
+    from ..common import HTTPClient, HTTPError, Curl
+    USE_PYCURL = True
+    print("Curl")
+except ImportError:
+    from ..common import HTTPClient, HTTPError
+    USE_PYCURL = False
+    print("NoCurl")
 
 
 def _get_latest_version(query: MutableMapping[str, Any], context: PipelineContext) -> str:
@@ -216,31 +225,56 @@ class RiotAPIService(DataSource):
         if "X-Method-Rate-Limit" in response_headers:
             limits = _split_rate_limit_header(response_headers["X-Method-Rate-Limit"])
             method_limiter.adjust_rate_limits_if_necessary(limits)
+    if USE_PYCURL:
+        def _get(self, url: str, parameters: MutableMapping[str, Any] = None, app_limiter: RiotAPIRateLimiter = None, method_limiter: RiotAPIRateLimiter = None, connection: Curl = None) -> Union[dict, list, Any]:
+            # Make a new RiotAPIRequest and run it until it returns or fails.
+            # If it returns, return the result.
+            # If it fails, throw an appropriate error.
+            request = RiotAPIRequest(service=self, url=url, parameters=parameters, app_limiter=app_limiter, method_limiter=method_limiter, connection=connection)
+            try:
+                return request()
+            except HTTPError as error:
+                # The error handlers didn't work, so raise an appropriate error.
+                new_error_type = _ERROR_CODES[error.code]
+                if new_error_type is RuntimeError:
+                    new_error = RuntimeError("Encountered an HTTP error code {code} with message \"{message}\" which should have already been handled. Report this to the Cassiopeia team.".format(code=error.code, message=str(error)))
+                elif new_error_type is APIError:
+                    new_error = APIError("The Riot API experienced an internal error on the request. You may want to retry the request after a short wait or continue without the result. The received error was {code}: \"{message}\"".format(code=error.code, message=str(error)), error.code)
+                elif new_error_type is APINotFoundError:
+                    new_error = APINotFoundError("The Riot API returned a NOT FOUND error for the request. The received error was {code}: \"{message}\"".format(code=error.code, message=str(error)), error.code)
+                elif new_error_type is APIRequestError:
+                    new_error = APIRequestError("The Riot API returned an error on the request. The received error was {code}: \"{message}\"".format(code=error.code, message=str(error)), error.code)
+                elif new_error_type is APIForbiddenError:
+                    new_error = APIForbiddenError("The Riot API returned a FORBIDDEN error for the request. The received error was {code}: \"{message}\"".format(code=error.code, message=str(error)), error.code)
+                else:
+                    new_error = new_error_type(str(error))
 
-    def _get(self, url: str, parameters: MutableMapping[str, Any] = None, app_limiter: RiotAPIRateLimiter = None, method_limiter: RiotAPIRateLimiter = None, connection: Curl = None) -> Union[dict, list, Any]:
+                raise new_error from error
+    else:
+        def _get(self, url: str, parameters: MutableMapping[str, Any] = None, app_limiter: RiotAPIRateLimiter = None, method_limiter: RiotAPIRateLimiter = None) -> Union[dict, list, Any]:
         # Make a new RiotAPIRequest and run it until it returns or fails.
-        # If it returns, return the result.
-        # If it fails, throw an appropriate error.
-        request = RiotAPIRequest(service=self, url=url, parameters=parameters, app_limiter=app_limiter, method_limiter=method_limiter, connection=connection)
-        try:
-            return request()
-        except HTTPError as error:
-            # The error handlers didn't work, so raise an appropriate error.
-            new_error_type = _ERROR_CODES[error.code]
-            if new_error_type is RuntimeError:
-                new_error = RuntimeError("Encountered an HTTP error code {code} with message \"{message}\" which should have already been handled. Report this to the Cassiopeia team.".format(code=error.code, message=str(error)))
-            elif new_error_type is APIError:
-                new_error = APIError("The Riot API experienced an internal error on the request. You may want to retry the request after a short wait or continue without the result. The received error was {code}: \"{message}\"".format(code=error.code, message=str(error)), error.code)
-            elif new_error_type is APINotFoundError:
-                new_error = APINotFoundError("The Riot API returned a NOT FOUND error for the request. The received error was {code}: \"{message}\"".format(code=error.code, message=str(error)), error.code)
-            elif new_error_type is APIRequestError:
-                new_error = APIRequestError("The Riot API returned an error on the request. The received error was {code}: \"{message}\"".format(code=error.code, message=str(error)), error.code)
-            elif new_error_type is APIForbiddenError:
-                new_error = APIForbiddenError("The Riot API returned a FORBIDDEN error for the request. The received error was {code}: \"{message}\"".format(code=error.code, message=str(error)), error.code)
-            else:
-                new_error = new_error_type(str(error))
+            # If it returns, return the result.
+            # If it fails, throw an appropriate error.
+            request = RiotAPIRequest(service=self, url=url, parameters=parameters, app_limiter=app_limiter, method_limiter=method_limiter)
+            try:
+                return request()
+            except HTTPError as error:
+                # The error handlers didn't work, so raise an appropriate error.
+                new_error_type = _ERROR_CODES[error.code]
+                if new_error_type is RuntimeError:
+                    new_error = RuntimeError("Encountered an HTTP error code {code} with message \"{message}\" which should have already been handled. Report this to the Cassiopeia team.".format(code=error.code, message=str(error)))
+                elif new_error_type is APIError:
+                    new_error = APIError("The Riot API experienced an internal error on the request. You may want to retry the request after a short wait or continue without the result. The received error was {code}: \"{message}\"".format(code=error.code, message=str(error)), error.code)
+                elif new_error_type is APINotFoundError:
+                    new_error = APINotFoundError("The Riot API returned a NOT FOUND error for the request. The received error was {code}: \"{message}\"".format(code=error.code, message=str(error)), error.code)
+                elif new_error_type is APIRequestError:
+                    new_error = APIRequestError("The Riot API returned an error on the request. The received error was {code}: \"{message}\"".format(code=error.code, message=str(error)), error.code)
+                elif new_error_type is APIForbiddenError:
+                    new_error = APIForbiddenError("The Riot API returned a FORBIDDEN error for the request. The received error was {code}: \"{message}\"".format(code=error.code, message=str(error)), error.code)
+                else:
+                    new_error = new_error_type(str(error))
 
-            raise new_error from error
+                raise new_error from error
 
     @abstractmethod
     def get(self, type: Type[T], query: MutableMapping[str, Any], context: PipelineContext = None) -> T:
@@ -253,22 +287,38 @@ class RiotAPIService(DataSource):
 
 
 class RiotAPIRequest(object):
-    def __init__(self, service: RiotAPIService, url: str, parameters: MutableMapping[str, Any], app_limiter: RiotAPIRateLimiter, method_limiter: RiotAPIRateLimiter, connection: Curl):
-        self.service = service
-        self.url = url
-        self.parameters = parameters
-        self.app_limiter = app_limiter
-        self.method_limiter = method_limiter
-        self.connection = connection
+    if USE_PYCURL:
+        def __init__(self, service: RiotAPIService, url: str, parameters: MutableMapping[str, Any], app_limiter: RiotAPIRateLimiter, method_limiter: RiotAPIRateLimiter, connection: Curl):
+            self.service = service
+            self.url = url
+            self.parameters = parameters
+            self.app_limiter = app_limiter
+            self.method_limiter = method_limiter
+            self.connection = connection
+    else:
+        def __init__(self, service: RiotAPIService, url: str, parameters: MutableMapping[str, Any], app_limiter: RiotAPIRateLimiter, method_limiter: RiotAPIRateLimiter):
+            self.service = service
+            self.url = url
+            self.parameters = parameters
+            self.app_limiter = app_limiter
+            self.method_limiter = method_limiter
+        
 
     def __call__(self):
         try:
-            body, response_headers = self.service._client.get(url=self.url,
+            if USE_PYCURL:
+                body, response_headers = self.service._client.get(url=self.url,
+                                                                  parameters=self.parameters,
+                                                                  headers=self.service._headers,
+                                                                  rate_limiters=[self.app_limiter,
+                                                                                 self.method_limiter],
+                                                                  connection=self.connection)
+            else:
+                 body, response_headers = self.service._client.get(url=self.url,
                                                               parameters=self.parameters,
                                                               headers=self.service._headers,
                                                               rate_limiters=[self.app_limiter,
-                                                                             self.method_limiter],
-                                                              connection=self.connection)
+                                                                             self.method_limiter])
             self.service._adjust_rate_limiters_from_headers(app_limiter=self.app_limiter,
                                                             method_limiter=self.method_limiter,
                                                             response_headers=response_headers)
@@ -308,13 +358,21 @@ class RiotAPIRequest(object):
                 raise error
             else:
                 try:
-                    body, response_headers = new_handler(error=error,
-                                                         requester=self.service._client.get,
-                                                         url=self.url,
-                                                         parameters=self.parameters,
-                                                         headers=self.service._headers,
-                                                         rate_limiters=[self.app_limiter, self.method_limiter],
-                                                         connection=self.connection)
+                    if USE_PYCURL:
+                        body, response_headers = new_handler(error=error,
+                                                             requester=self.service._client.get,
+                                                             url=self.url,
+                                                             parameters=self.parameters,
+                                                             headers=self.service._headers,
+                                                             rate_limiters=[self.app_limiter, self.method_limiter],
+                                                             connection=self.connection)
+                    else:
+                        body, response_headers = new_handler(error=error,
+                                                             requester=self.service._client.get,
+                                                             url=self.url,
+                                                             parameters=self.parameters,
+                                                             headers=self.service._headers,
+                                                             rate_limiters=[self.app_limiter, self.method_limiter])
                     self.service._adjust_rate_limiters_from_headers(app_limiter=self.app_limiter,
                                                                     method_limiter=self.method_limiter,
                                                                     response_headers=response_headers)
@@ -324,11 +382,16 @@ class RiotAPIRequest(object):
                         handlers.append(new_handler)
                     return self._retry_request_by_handling_error(error, handlers=handlers)
 
-
-class FailedRequestHandler(ABC):
-    @abstractmethod
-    def __call__(self, error, requester, url, parameters, headers, rate_limiters, connection) -> Tuple[Union[dict, list, str, bytes], dict]:
-        pass
+if USE_PYCURL:
+    class FailedRequestHandler(ABC):
+        @abstractmethod
+        def __call__(self, error, requester, url, parameters, headers, rate_limiters, connection) -> Tuple[Union[dict, list, str, bytes], dict]:
+            pass
+else:
+    class FailedRequestHandler(ABC):
+        @abstractmethod
+        def __call__(self, error, requester, url, parameters, headers, rate_limiters) -> Tuple[Union[dict, list, str, bytes], dict]:
+            pass
 
 
 class ExponentialBackoff(FailedRequestHandler):
@@ -338,16 +401,27 @@ class ExponentialBackoff(FailedRequestHandler):
         self.max_attempts = max_attempts
         self.attempts = 0
         self.stop = False
-
-    def __call__(self, error, requester, url, parameters, headers, rate_limiters, connection) ->  Tuple[Union[dict, list, str, bytes], dict]:
-        if self.attempts >= self.max_attempts:
-            self.stop = True
-            raise error
-        print("INFO: Unexpected {} error ({}), backing off for {} seconds.".format(headers.get('X-Rate-Limit-Type', 'service'), error.code, self.backoff))
-        time.sleep(self.backoff)
-        self.backoff = self.backoff * self.factor
-        self.attempts += 1
-        return requester(url, parameters, headers, rate_limiters, connection)
+    if USE_PYCURL:
+        def __call__(self, error, requester, url, parameters, headers, rate_limiters, connection) ->  Tuple[Union[dict, list, str, bytes], dict]:
+            if self.attempts >= self.max_attempts:
+                self.stop = True
+                raise error
+            print("INFO: Unexpected {} error ({}), backing off for {} seconds.".format(headers.get('X-Rate-Limit-Type', 'service'), error.code, self.backoff))
+            time.sleep(self.backoff)
+            self.backoff = self.backoff * self.factor
+            self.attempts += 1
+            return requester(url, parameters, headers, rate_limiters, connection)
+    else:
+        def __call__(self, error, requester, url, parameters, headers, rate_limiters) ->  Tuple[Union[dict, list, str, bytes], dict]:
+            if self.attempts >= self.max_attempts:
+                self.stop = True
+                raise error
+            print("INFO: Unexpected {} error ({}), backing off for {} seconds.".format(headers.get('X-Rate-Limit-Type', 'service'), error.code, self.backoff))
+            time.sleep(self.backoff)
+            self.backoff = self.backoff * self.factor
+            self.attempts += 1
+            return requester(url, parameters, headers, rate_limiters)
+        
 
 
 class RetryFromHeaders(object):
@@ -355,23 +429,38 @@ class RetryFromHeaders(object):
         self.max_attempts = int(max_attempts)
         self.attempts = 0
         self.stop = False
-
-    def __call__(self, error, requester, url, parameters, headers, rate_limiters, connection) -> Tuple[Union[dict, list, str, bytes], dict]:
-        if self.attempts >= self.max_attempts:
-            self.stop = True
-            raise error
-        backoff = int(error.response_headers["Retry-After"])
-        print("INFO: Unexpected {} rate limit, backing off for {} seconds (from headers).".format(headers.get('X-Rate-Limit-Type', 'service'), backoff))
-        time.sleep(backoff)
-        for rate_limiter in rate_limiters:
-            rate_limiter.restrict_for(backoff)
-        self.attempts += 1
-        return requester(url, parameters, headers, rate_limiters, connection)
+    if USE_PYCURL:
+        def __call__(self, error, requester, url, parameters, headers, rate_limiters, connection) -> Tuple[Union[dict, list, str, bytes], dict]:
+            if self.attempts >= self.max_attempts:
+                self.stop = True
+                raise error
+            backoff = int(error.response_headers["Retry-After"])
+            print("INFO: Unexpected {} rate limit, backing off for {} seconds (from headers).".format(headers.get('X-Rate-Limit-Type', 'service'), backoff))
+            time.sleep(backoff)
+            for rate_limiter in rate_limiters:
+                rate_limiter.restrict_for(backoff)
+            self.attempts += 1
+            return requester(url, parameters, headers, rate_limiters, connection)
+    else:
+        def __call__(self, error, requester, url, parameters, headers, rate_limiters) -> Tuple[Union[dict, list, str, bytes], dict]:
+            if self.attempts >= self.max_attempts:
+                self.stop = True
+                raise error
+            backoff = int(error.response_headers["Retry-After"])
+            print("INFO: Unexpected {} rate limit, backing off for {} seconds (from headers).".format(headers.get('X-Rate-Limit-Type', 'service'), backoff))
+            time.sleep(backoff)
+            for rate_limiter in rate_limiters:
+                rate_limiter.restrict_for(backoff)
+            self.attempts += 1
+            return requester(url, parameters, headers, rate_limiters)
 
 
 class ThrowException(FailedRequestHandler):
     def __init__(self):
         self.stop  = True
-
-    def __call__(self, error, requester, url, parameters, headers, rate_limiters, connection) -> Tuple[Union[dict, list, str, bytes], dict]:
-        raise error
+    if USE_PYCURL:
+        def __call__(self, error, requester, url, parameters, headers, rate_limiters, connection) -> Tuple[Union[dict, list, str, bytes], dict]:
+            raise error
+    else:
+        def __call__(self, error, requester, url, parameters, headers, rate_limiters) -> Tuple[Union[dict, list, str, bytes], dict]:
+            raise error

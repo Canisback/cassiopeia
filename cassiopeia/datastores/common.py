@@ -182,7 +182,7 @@ else:  # Use requests
 
             return r
 
-        def get(self, url: str, parameters: MutableMapping[str, Any] = None, headers: Mapping[str, str] = None, rate_limiters: List[RateLimiter] = None, connection: Curl = None, encode_parameters: bool = True) -> (Union[dict, list, str, bytes], dict):
+        def get(self, url: str, parameters: MutableMapping[str, Any] = None, headers: Mapping[str, str] = None, rate_limiters: List[RateLimiter] = None, encode_parameters: bool = True) -> (Union[dict, list, str, bytes], dict):
             if parameters:
                 if encode_parameters:
                     parameters = {k: str(v).lower() if isinstance(v, bool) else v for k, v in parameters.items()}
